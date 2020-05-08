@@ -25,18 +25,7 @@ definition(
 
 
 preferences {
-	section("When motion from...") {
-         input "sourceMotion", "capability.motionSensor", required: true, multiple: true
-	}
-    
-    section("Main courtesy switch...") {
-    	input "targetSwitch", "capability.switch", required: true
-        input "targetSwitchOffAfterMinutes", "number", title: "Off after (minutes)?", defaultValue: "2"
-    }
-    
-    section("Optional switches") {
-    	input "optionalSwitches", "capability.switch", required: false, multiple: true
-    }    
+    page(name: "configure")
 }
 
 def installed() {
@@ -61,9 +50,41 @@ def initialize() {
 }
 
 def init() {
-	state.appPrefix = "** SCL **: "
+	state.appPrefix = "** SCLv2 **: "
 	state.sundown = getSunDownState();
     state.autoSwitchOffRequired = false;
+}
+
+def configure() {
+    dynamicPage(name: "configure", title: "Configure switch and routines", install: true, uninstall: true) {
+
+        section("When motion from...") {
+             input "sourceMotion", "capability.motionSensor", required: true, multiple: true
+        }
+
+        section("Main courtesy switch/light...") {
+            input "targetSwitch", "capability.switch", required: true
+            input "targetSwitchOffAfterMinutes", "number", title: "Off after (minutes)?", defaultValue: "2", required: true
+        }
+
+        // get the available actions
+        def actions = location.helloHome?.getPhrases()*.label
+        if (actions) {
+            // sort them alphabetically
+            log.trace actions
+            actions.sort()
+            
+            section("Select 'On' Routine") {                
+                // use the actions as the options for an enum input
+                input "onRoutine", "enum", title: "Select a routine to execute", options: actions, required: true
+            }
+            section("Select 'Off' Routine") {
+                log.trace actions
+                // use the actions as the options for an enum input
+                input "offRoutine", "enum", title: "Select a routine to execute", options: actions, required: true
+            }
+        }
+    }
 }
 
 def getSunDownState() {
@@ -71,19 +92,19 @@ def getSunDownState() {
     def now = new Date()
         
     def sundown = (now >= ssToday.sunset) || (now < ssToday.sunrise)
-    log.debug "${state.appPrefix} sunrise: ${ssToday.sunrise}, sunset: ${ssToday.sunset}, sundown: ${sundown}"
+    log.debug "${state.appPrefix} sunrise: ${ssToday.sunrise}, sunset: ${ssToday.sunset}, Is Sun Down? ${sundown}"
 
     return sundown
 }
 
 def motionActiveHandler(evt) {		
-	def currentSwitchState = targetSwitch.switchState.value
-	log.debug "${state.appPrefix} motion detected! targetSwitch state: ${currentSwitchState}"
+	def targetCurrentState = targetSwitch.switchState.value
+	log.debug "${state.appPrefix} motion detected! targetSwitch state: ${targetCurrentState}"
         
     unschedule()
     
-    if (state.sundown && currentSwitchState == "off") {
-    	switchAllOn()
+    if (state.sundown && targetCurrentState == "off") {
+    	runOnRoutine()
     } else {
     	log.debug "${state.appPrefix} it's either daylight or the switch is already on, switch-off not required!"
     }    
@@ -94,30 +115,22 @@ def motionInActiveHandler(evt) {
     
 	if (state.autoSwitchOffRequired) {
 		log.debug "${state.appPrefix} scheduling switch off in ${targetSwitchOffAfterMinutes} minute(s)..."
-    	runIn(targetSwitchOffAfterMinutes * 60, switchAllOff)
+    	runIn(targetSwitchOffAfterMinutes * 60, runOffRoutine)
     }
 }
 
-def switchAllOn() {
-	targetSwitch.on()
-    
-    if (optionalSwitches) {
-    	optionalSwitches.on()
-    }
+def runOnRoutine() {
+	location.helloHome?.execute(settings.onRoutine)
     
     state.autoSwitchOffRequired = true;
-    log.debug "${state.appPrefix} switched everything on!"
+    log.debug "${state.appPrefix} 'on' routine '${settings.onRoutine}' executing!"
 }
 
-def switchAllOff() {
-	targetSwitch.off()
-    
-    if (optionalSwitches) {
-    	optionalSwitches.off()
-    }
+def runOffRoutine() {
+	location.helloHome?.execute(settings.offRoutine)
     
     state.autoSwitchOffRequired = false;
-    log.debug "${state.appPrefix} switched everything off!"
+    log.debug "${state.appPrefix} 'off' routine '${settings.offRoutine}' executing!"
 }
 
 def sunRiseHandler(evt) {
